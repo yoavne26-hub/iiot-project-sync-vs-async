@@ -62,6 +62,18 @@ Interpretation of the visual states:
 
 This makes it possible to see the difference between ordered synchronous propagation and overlapping asynchronous propagation.
 
+### Asynchronous Execution Example
+
+The following screen captures the asynchronous environment during active execution, with the live graph and the message log visible at the same time.
+
+![Asynchronous live execution](screenshots/async-screen-2.png)
+
+This view is useful for observing that:
+
+- multiple message chains may overlap in time
+- delivery order is driven by message arrival rather than round boundaries
+- some received messages do not change the table and are therefore recorded as `no table change`
+
 ### Message Log
 
 The message log provides a textual trace of the same execution.
