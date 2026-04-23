@@ -1,164 +1,261 @@
 # IIOT Project Visuals
 
-Desktop Tkinter visual simulator for an IIOT network-routing exercise. The project models a group of agents connected by an undirected graph and visualizes how routing-table information spreads through the network in synchronous and asynchronous modes.
+Desktop Tkinter visual simulator for an IIOT routing exercise. The project generates an undirected agent network, runs the same update-table algorithm in both synchronous and asynchronous environments, and visualizes how routing knowledge propagates until convergence.
 
-## What It Does
+## Project Description
 
-- Generates a random agent network from configurable parameters.
-- Runs synchronous simulations where messages are collected and delivered round by round.
-- Runs asynchronous simulations where agents process queued messages independently.
-- Records message sends, message processing, table changes, convergence, and timing metrics.
-- Displays an interactive Tkinter playback of the network, final tables, logs, and summaries.
+This project was built to study the behavioral difference between two distributed execution environments:
+
+- a **synchronous environment**, where all agents act in explicit rounds
+- an **asynchronous environment**, where each agent reacts independently when messages arrive
+
+Both environments run the same routing-table update rule. The GUI allows the user to configure a network, run one or both simulators, and inspect the resulting message flow, final agent tables, and convergence metrics.
+
+## Objectives
+
+The system is designed to support the following academic goals:
+
+- model a network of agents connected by probabilistic neighbor relationships
+- implement a table-based update algorithm for distributed routing knowledge
+- compare synchronous round-based execution with asynchronous message-driven execution
+- measure convergence behavior, message counts, and final reachability
+- provide a visual explanation of how the algorithm evolves over time
+
+## System Overview
+
+The application consists of:
+
+- a **graph generator** that creates a random undirected network from user parameters
+- a **shared data model** for agents, messages, and update tables
+- a **synchronous simulator**
+- an **asynchronous simulator**
+- a **Tkinter visualizer** that replays simulation traces and presents tables and metrics
+
+## Visual Overview
+
+### Main Application Window
+
+This view shows the configuration controls and the generated simulation tabs.
+
+![Main simulator window](screenshots/sync-screen.png)
+
+The interface lets the user choose:
+
+- environment: synchronous, asynchronous, or both
+- number of agents
+- edge probability
+- random seed
+
+After the run starts, each environment receives its own tab with playback controls, a live graph, a message log, final routing tables, and a summary view.
+
+### Live Graph Playback
+
+The graph visualization illustrates message propagation directly on the network.
+
+![Live graph playback](screenshots/graph-screen.png)
+
+Interpretation of the visual states:
+
+- **yellow path and dot**: a message currently traveling
+- **green edge highlight**: a delivered message that changed a table
+- **plain nodes and edges**: inactive graph state
+
+This makes it possible to see the difference between ordered synchronous propagation and overlapping asynchronous propagation.
+
+### Message Log
+
+The message log provides a textual trace of the same execution.
+
+![Message log view](screenshots/message-log.png)
+
+The log is useful for connecting the visual animation to the underlying algorithmic actions:
+
+- outgoing sends
+- payload contents
+- delivery order
+- whether a received message updated the table
+
+### Final Routing Tables
+
+Each agent has its own final table view after the simulation completes.
+
+![Final tables view](screenshots/async-agent-tables.png)
+
+These tables allow direct inspection of:
+
+- known targets
+- final shortest distances
+- the neighbor used as the current forwarding choice (`via`)
+
+### Summary Metrics
+
+The summary tab collects graph statistics and convergence metrics in a structured form.
+
+![Synchronous summary](screenshots/sync-summary.png)
+
+![Asynchronous summary](screenshots/async-summary.png)
+
+These values support comparison between the two environments for the same generated network.
 
 ## Project Structure
 
-- `main.py` - application entrypoint.
-- `backend/config.py` - default constants such as seed, maximum iterations, and async queue timeout.
-- `backend/network.py` - random undirected graph generation.
-- `backend/models.py` - core data models: agents, messages, and routing/update tables.
-- `backend/simulations.py` - synchronous and asynchronous simulators plus trace recording.
-- `frontend/visualizer.py` - Tkinter GUI, graph playback, tables, logs, and summary panels.
-- `docs/` - assignment/reference documents.
-- `requirements.txt` - Python dependency list.
+- `main.py` - application entrypoint
+- `backend/config.py` - default constants such as seed, iteration limit, and async timeout
+- `backend/network.py` - random graph generation
+- `backend/models.py` - `Agent`, `Message`, `TableRow`, and `UpdateTable`
+- `backend/simulations.py` - synchronous and asynchronous runtime logic plus trace recording
+- `frontend/visualizer.py` - Tkinter GUI and playback system
+- `screenshots/` - repository screenshots used in this README
+- `docs/` - assignment/reference material
 
 ## Core Models
 
-The backend is built around three simple ideas:
+The backend uses three main logical entities.
 
-- `Agent` - one node in the network. Each agent has a unique numeric ID, a list of neighbors, and its own update table.
-- `Message` - a payload sent from one agent to one neighbor. The payload contains only `{target: distance}` pairs.
-- `UpdateTable` - the local knowledge of one agent. Each row stores:
-  - `target` - destination agent ID
-  - `distance` - known distance to that destination
-  - `via` - the neighbor through which that destination is currently reached
+### Agent
 
-Every agent starts with exactly one row in its table:
+An `Agent` represents one node in the network. Each agent has:
+
+- a unique integer identifier
+- a set of neighbors
+- its own update table
+
+### Message
+
+A `Message` represents one transmission from a sender to a receiver.
+
+Its payload contains only:
+
+- `{target: distance}`
+
+The payload intentionally excludes the `via` column. The receiving agent reconstructs `via` locally as the sender of the message.
+
+### Update Table
+
+Each agent stores its current knowledge in an `UpdateTable`. Every row contains:
+
+- `target` - destination agent ID
+- `distance` - known distance to that destination
+- `via` - neighbor through which the destination is reached
+
+Each agent starts with exactly one row:
 
 - `(self, 0, self)`
 
-That means each agent initially knows only how to reach itself with distance `0`.
+This means every agent initially knows only how to reach itself.
 
 ## Update Algorithm
 
-The update rule is implemented in `UpdateTable.process_incoming_payload(...)`.
+The update algorithm is implemented in `UpdateTable.process_incoming_payload(...)`.
 
-When agent `Ai` receives a message from neighbor `Aj`, it processes every row in `Aj`'s payload:
+When an agent `Ai` receives a payload from neighbor `Aj`, it processes every received `(target, distance)` pair as follows:
 
-1. Read one `(target, received_distance)` pair from the incoming payload.
-2. Compute `candidate_distance = received_distance + 1`.
-3. If `target` does not exist in `Ai`'s table, add a new row:
+1. Compute `candidate_distance = received_distance + 1`.
+2. If the target does not exist in `Ai`'s table, add a new row:
    - `(target, candidate_distance, Aj)`
-4. If `target` already exists but the current known distance is larger than `candidate_distance`, replace the row:
+3. If the target already exists but the stored distance is larger than `candidate_distance`, replace the row:
    - `(target, candidate_distance, Aj)`
-5. Otherwise leave the row unchanged.
+4. Otherwise, keep the existing row.
 
-Important detail:
+This is a shortest-path style distance-vector update rule. A table changes only when new information introduces a previously unknown target or a shorter path.
 
-- Agents do **not** send the `via` column in messages.
-- They only send `{target: distance}`.
-- The receiving agent reconstructs the `via` column locally as `sender`.
+## Execution Environments
 
-This is a distance-vector style update rule: each agent improves its table only when a shorter path is discovered.
-
-## Environments
-
-The project implements the same update algorithm in two different execution environments.
+The same update rule is executed in two different environments.
 
 ### Synchronous Environment
 
-The synchronous simulator works in explicit rounds.
+In the synchronous simulator, time is divided into explicit rounds.
 
-How it behaves:
+Round logic:
 
-1. At the start of a round, each agent prepares outgoing messages from its current table.
-2. Those messages are stored in `current_round_messages`.
-3. The simulator processes all messages in that round.
-4. If tables changed, the next wave of messages is built into `next_round_messages`.
-5. Those new messages become visible only in the **next** round.
+1. At the beginning of the round, every agent prepares its outgoing messages from its current table.
+2. These messages are stored in the current round buffer.
+3. All current-round messages are processed.
+4. If any table changed, the next wave of messages is generated for the next round.
+5. Newly generated messages are not allowed to affect the current round.
 
-This means:
+Implications:
 
-- no message generated during round `i` can affect round `i` immediately
-- all agents conceptually act against the same round snapshot
-- convergence happens when a full round completes with no table changes
-
-This is the clean round-based interpretation of the exercise.
+- all agents conceptually observe the same round boundary
+- same-round cascades are prevented
+- convergence occurs when a full round finishes with no table changes
 
 ### Asynchronous Environment
 
-The asynchronous simulator treats each agent as its own worker thread.
+In the asynchronous simulator, each agent is represented by its own worker thread.
 
-How it behaves:
+Execution logic:
 
-1. Each agent owns a blocking inbox queue.
-2. A worker thread waits until a message arrives for that agent.
-3. When a message arrives, the agent updates its table immediately.
-4. If the table changed, the agent immediately sends its updated payload to all neighbors.
+1. Each agent owns an inbox queue.
+2. The worker blocks until a message arrives.
+3. On message arrival, the agent updates its table immediately.
+4. If the table changed, the agent immediately broadcasts its updated payload to neighbors.
 5. There is no global round barrier.
 
-This means:
+Implications:
 
-- agents react independently
-- useful updates can ripple through the graph immediately
-- an agent stays idle until it receives a message
-- convergence happens when no messages are left queued or being processed
+- updates can propagate immediately
+- multiple causal chains may overlap in time
+- convergence occurs when no message remains queued or in flight
 
-The async environment is therefore event-driven rather than round-driven.
+## How the Application Works
 
-## How The Whole System Works
+The full runtime flow is:
 
-From startup to visualization, the flow is:
-
-1. `main.py` launches the Tkinter application.
-2. The user chooses:
-   - number of agents
-   - edge probability
-   - random seed
-   - environment (`sync`, `async`, or both`)
-3. `backend/network.py` generates a random undirected graph.
-4. `build_agents(...)` converts that graph into `Agent` objects.
-5. The selected simulator runs:
+1. The user enters the simulation parameters.
+2. The graph generator creates an undirected random network.
+3. The graph is converted into `Agent` objects.
+4. The selected simulator runs:
    - `SynchronousSimulator`
    - `AsynchronousSimulator`
-6. While the simulator runs, the backend records a structured trace of:
-   - messages sent
-   - messages processed
-   - round boundaries
-   - table changes
+5. During execution, the backend records structured events such as:
+   - message sent
+   - message processed
+   - round start and round end
    - convergence
-7. The frontend replays that trace on the graph canvas and shows:
-   - live message flow
-   - final tables for every agent
-   - summary metrics such as iterations, message counts, distances, density, and runtime
+6. The frontend replays those events in the GUI and shows:
+   - live graph animation
+   - textual message log
+   - final routing tables
+   - summary metrics
 
-## Convergence
+## Convergence and Measurement
 
-The project uses the assignment's convergence idea: the system has converged when tables stop changing.
+The project measures convergence using the assignment's operational meaning: the system has converged when no more useful table changes occur.
 
-In practice:
+### Synchronous convergence
 
-- synchronous: convergence is detected when an entire round finishes without any table updates
-- asynchronous: convergence is detected when no message remains in flight and no worker is still processing a message
+- convergence is detected when an entire round completes with zero table changes
 
-## Measurement And Summary
+### Asynchronous convergence
 
-Each simulation result includes:
+- convergence is detected when no queued or active message remains in the system
 
-- number of iterations or processed message steps
+### Reported metrics
+
+The summary view includes:
+
+- node count
+- edge count
+- density
+- degree statistics
+- number of iterations or processed steps
 - total messages sent
 - total messages processed
 - total table changes
-- runtime in seconds and milliseconds
-- graph statistics such as node count, edge count, density, and degree metrics
-- routing statistics such as longest distance, average distance, known routes, and reachability percentage
+- useful message percentage
+- reachability percentage
+- longest and average final distance
+- runtime in milliseconds and seconds
 
-These values are used by the GUI summary tab so the user can compare synchronous and asynchronous behavior on the same generated network.
+These values make it possible to compare algorithmic behavior between the two environments on the same graph instance.
 
 ## Requirements
 
 The project currently uses only the Python standard library. Python 3.10 or newer is recommended because the code uses modern type hint syntax.
 
-Tkinter is required for the GUI. It is included with most standard Python installations on Windows.
+Tkinter is required for the GUI and is included with most standard Python installations on Windows.
 
 ## Setup
 
@@ -175,10 +272,20 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-The requirements file is intentionally empty except for a note because there are no third-party dependencies.
+The requirements file is intentionally minimal because the project currently depends only on the standard library.
 
-## Run The Visualizer
+## Run the Visualizer
 
 ```powershell
 python main.py
 ```
+
+## Academic Notes
+
+From an academic perspective, the project is intended to highlight that:
+
+- the **algorithm** can remain fixed while the **execution environment** changes
+- synchronous execution is easier to reason about because round boundaries are explicit
+- asynchronous execution can be more dynamic but requires careful thinking about causality and termination
+
+The visual interface was designed to make those differences observable rather than purely theoretical.
