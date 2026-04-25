@@ -172,7 +172,13 @@ class SimulationPlaybackFrame(ttk.Frame):
             playback_events.append(event)
 
         for pending_queue in pending_sends.values():
-            playback_events.extend(pending_queue)
+            for orphan in pending_queue:
+                insert_at = len(playback_events)
+                for i, ev in enumerate(playback_events):
+                    if ev["step"] >= orphan["step"]:
+                        insert_at = i
+                        break
+                playback_events.insert(insert_at, orphan)
 
         return playback_events
 
@@ -655,16 +661,22 @@ class SimulationPlaybackFrame(ttk.Frame):
     def _collect_async_burst(self) -> list[dict[str, object]]:
         """Collect deliveries that began effectively at the same time."""
 
+        def _effective_timestamp(event: dict[str, object]) -> float:
+            ts = event.get("sent_timestamp_ms")
+            if ts is not None:
+                return float(ts)
+            return float(event.get("processed_timestamp_ms") or 0.0)
+
         burst: list[dict[str, object]] = []
         first_event = self.playback_events[self.current_event_index]
-        first_timestamp = float(first_event.get("sent_timestamp_ms") or 0.0)
+        first_timestamp = _effective_timestamp(first_event)
 
         while self.current_event_index < len(self.playback_events):
             event = self.playback_events[self.current_event_index]
             if event["kind"] != "message_delivery":
                 break
 
-            timestamp = float(event.get("sent_timestamp_ms") or 0.0)
+            timestamp = _effective_timestamp(event)
             if burst and abs(timestamp - first_timestamp) > ASYNC_SIMULTANEOUS_WINDOW_MS:
                 break
 
@@ -683,12 +695,13 @@ class SimulationPlaybackFrame(ttk.Frame):
             sender = int(event["sender"])
             receiver = int(event["receiver"])
             key = edge_key(sender, receiver)
-            self.message_counts[key] = self.message_counts.get(key, 0) + 1
+            self._update_edge_count(key)
             self._set_node_color(sender, NODE_SEND, halo=EDGE_ACTIVE)
             self._set_edge_color(key, EDGE_ACTIVE, width=5)
-            self._update_edge_count(key)
+            payload = event.get("payload")
+            payload_str = format_payload(payload) if payload is not None else "unpaired"
             self._append_log(
-                f"Send  {sender} -> {receiver} | payload [{format_payload(event.get('payload'))}]"
+                f"Send  {sender} -> {receiver} | payload [{payload_str}]"
             )
             changed = bool(event["changed"])
             self._animate_message_dot(
@@ -712,13 +725,14 @@ class SimulationPlaybackFrame(ttk.Frame):
         sender = int(event["sender"])
         receiver = int(event["receiver"])
         key = edge_key(sender, receiver)
-        self.message_counts[key] = self.message_counts.get(key, 0) + 1
+        self._update_edge_count(key)
         self._clear_transient_state()
         self._set_node_color(sender, NODE_SEND, halo=EDGE_ACTIVE)
         self._set_edge_color(key, EDGE_ACTIVE, width=5)
-        self._update_edge_count(key)
+        payload = event.get("payload")
+        payload_str = format_payload(payload) if payload is not None else "unpaired"
         self._append_log(
-            f"Send  {sender} -> {receiver} | payload [{format_payload(event.get('payload'))}]"
+            f"Send  {sender} -> {receiver} | payload [{payload_str}]"
         )
         changed = bool(event["changed"])
         self._animate_message_dot(
@@ -733,14 +747,14 @@ class SimulationPlaybackFrame(ttk.Frame):
         sender = int(event["sender"])
         receiver = int(event["receiver"])
         key = edge_key(sender, receiver)
-        self.message_counts[key] = self.message_counts.get(key, 0) + 1
+        self._update_edge_count(key)
         self._clear_transient_state()
         self._set_node_color(sender, NODE_SEND, halo=EDGE_ACTIVE)
         self._set_edge_color(key, EDGE_ACTIVE, width=5)
-        self._update_edge_count(key)
-        self._append_log(
-            f"Send  {sender} -> {receiver} | payload [{format_payload(event.get('payload'))}]"
-        )
+        payload = event.get("payload")
+        payload_str = format_payload(payload) if payload is not None else "unpaired"
+        self._append_log(f"Send  {sender} -> {receiver} | payload [{payload_str}]")
+        self._schedule_next(self._scaled_delay(220))
         self._schedule_next(self._scaled_delay(220))
 
     def _complete_delivery(self, sender: int, receiver: int, changed: bool, schedule_next: bool) -> None:
@@ -774,6 +788,7 @@ class SimulationPlaybackFrame(ttk.Frame):
         total_steps = 16
         step_delay = self._scaled_delay(28)
         token = self.animation_token
+        holder: dict[str, str] = {}
 
         def animate(step_index: int) -> None:
             if token != self.animation_token:
@@ -789,7 +804,6 @@ class SimulationPlaybackFrame(ttk.Frame):
                 y + dot_radius,
             )
             if step_index < total_steps:
-                holder: dict[str, str] = {}
 
                 def continue_animation() -> None:
                     self._consume_animation_job(holder["id"])
@@ -835,9 +849,8 @@ class SimulationPlaybackFrame(ttk.Frame):
         self.canvas.itemconfigure(shapes["line"], fill=color, width=width)
 
     def _update_edge_count(self, key: tuple[int, int]) -> None:
-        """Keep edge counts for metrics without drawing them on the canvas."""
-
-        _ = key
+        """Increment the traversal count for an edge."""
+        self.message_counts[key] = self.message_counts.get(key, 0) + 1
 
     def _append_log(self, line: str) -> None:
         """Append one line to the message log."""
