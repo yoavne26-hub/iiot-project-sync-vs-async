@@ -301,3 +301,8 @@ From an academic perspective, the project is intended to highlight that:
 - asynchronous execution can be more dynamic but requires careful thinking about causality and termination
 
 The visual interface was designed to make those differences observable rather than purely theoretical.
+
+
+## Authors
+- Roi Laniado
+- Yoav Nesher
