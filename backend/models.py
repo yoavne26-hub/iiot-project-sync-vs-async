@@ -58,9 +58,11 @@ class UpdateTable:
         changed = False
 
         for target, received_distance in payload.items():
+            # A neighbor's distance becomes one hop farther from this agent.
             candidate_distance = received_distance + 1
             current_row = self.rows.get(target)
 
+            # Keep only the shortest route known so far.
             if current_row is None or candidate_distance < current_row.distance:
                 self.rows[target] = TableRow(
                     target=target,
@@ -121,11 +123,13 @@ class Agent:
     def get_payload(self) -> dict[int, int]:
         """Return the table summary used for outgoing messages."""
 
+        # Messages share distances only; the receiver decides the next hop.
         return self.table.export_payload()
 
     def receive_message(self, sender: int, payload: dict[int, int]) -> bool:
         """Process one incoming payload and return True if the table changed."""
 
+        # Only direct neighbors are allowed to exchange routing updates.
         if sender not in self.neighbors:
             raise ValueError(f"Agent {sender} is not a neighbor of agent {self.agent_id}.")
 

@@ -214,6 +214,7 @@ class SimulationRecorder:
         """Record one message being sent."""
 
         round_text = f" in round {round_number}" if round_number is not None else ""
+        # The visualizer uses this event to animate the payload moving on an edge.
         self.add(
             SimulationEvent(
                 step=0,
@@ -241,6 +242,7 @@ class SimulationRecorder:
 
         effect = "updated" if changed else "did not change"
         round_text = f" during round {round_number}" if round_number is not None else ""
+        # Store the receiver snapshot after processing so the UI can show the table change.
         self.add(
             SimulationEvent(
                 step=0,
@@ -322,6 +324,7 @@ class SynchronousSimulator:
             payload = agent.get_payload()
 
             for neighbor_id in agent.neighbors:
+                # Copy the payload so later table edits do not mutate this queued message.
                 messages.append(
                     Message(
                         sender=agent.agent_id,
@@ -338,6 +341,7 @@ class SynchronousSimulator:
         if self._round_buffers_seeded:
             return self.current_round_messages
 
+        # Synchronous mode freezes all messages before round 1 starts.
         self.current_round_messages = self.build_outgoing_messages()
         self.total_messages_sent += len(self.current_round_messages)
         self._round_buffers_seeded = True
@@ -350,6 +354,7 @@ class SynchronousSimulator:
 
         for message in self.current_round_messages:
             receiver = self.agents[message.receiver]
+            # Deliveries update receiver tables, but they do not create messages mid-round.
             changed = receiver.receive_message(
                 sender=message.sender,
                 payload=message.payload,
@@ -365,6 +370,7 @@ class SynchronousSimulator:
     def build_next_round_messages(self) -> list[Message]:
         """Prepare the messages that will become available next round."""
 
+        # New knowledge is broadcast only after the current round finishes.
         self.next_round_messages = self.build_outgoing_messages()
         self.total_messages_sent += len(self.next_round_messages)
         return self.next_round_messages
@@ -372,6 +378,7 @@ class SynchronousSimulator:
     def advance_to_next_round(self) -> None:
         """Advance the round boundary explicitly."""
 
+        # Swap buffers so next-round messages become the current round's input.
         self.current_round_messages = self.next_round_messages
         self.next_round_messages = []
 
@@ -443,10 +450,12 @@ class AsyncAgentWorker(threading.Thread):
         while True:
             message = self.inbox.get()
             if message is None:
+                # None is the shutdown signal sent by the simulator controller.
                 return
 
             changed = False
             try:
+                # Async workers process messages immediately when they leave the inbox.
                 changed = self.agent.receive_message(
                     sender=message.sender,
                     payload=message.payload,
@@ -455,6 +464,7 @@ class AsyncAgentWorker(threading.Thread):
                     self.simulator.on_message_processed(message, changed, self.agent)
 
                 if changed:
+                    # A useful update immediately triggers a new broadcast from this agent.
                     self.simulator.broadcast_from(self.agent.agent_id)
             except Exception as error:
                 self.simulator.register_worker_error(error)
@@ -502,6 +512,7 @@ class AsynchronousSimulator:
         """Place a message into one agent inbox and update async state."""
 
         with self.state_condition:
+            # In-flight count is the async convergence signal.
             self.total_messages_sent += 1
             self.in_flight_messages += 1
 
@@ -517,6 +528,7 @@ class AsynchronousSimulator:
         payload = agent.get_payload()
 
         for neighbor_id in agent.neighbors:
+            # Each neighbor receives its own payload copy.
             self.send_message(
                 Message(
                     sender=agent.agent_id,
@@ -535,6 +547,7 @@ class AsynchronousSimulator:
         """Mark one message as fully handled and notify convergence waiters."""
 
         with self.state_condition:
+            # When this reaches zero, no queued or active async work remains.
             self.total_messages_processed += 1
             self.in_flight_messages -= 1
             if changed:
@@ -620,6 +633,7 @@ def run_synchronous_visual_simulation(
         round_number = simulator.rounds_completed + 1
         current_round_messages = list(simulator.current_round_messages)
 
+        # The recorder mirrors the synchronous delivery order for the frontend trace.
         recorder.record_round_start(
             round_number=round_number,
             message_count=len(current_round_messages),
@@ -644,6 +658,7 @@ def run_synchronous_visual_simulation(
         recorder.record_round_end(round_number=round_number, changes_in_round=changes_in_round)
 
         if simulator.has_converged(delivery_results):
+            # A full round with no changes means all shortest paths are stable.
             recorder.record_convergence(environment="Synchronous")
             simulator.current_round_messages = []
             simulator.next_round_messages = []
